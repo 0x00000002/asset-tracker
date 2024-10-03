@@ -1,0 +1,16 @@
+# "org" ensures this Service is used with the correct Serverless Framework Access Key.
+org: tknff
+# "app" enables Serverless Framework Dashboard features and sharing them with other Services.
+app: asset-tracker
+# "service" is the name of this project. This will also be added to your AWS resource names.
+service: FV
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+
+functions:
+  asset-tracker:
+    handler: handler.handler
+    events:
+      - schedule: rate(1 hour)  
