@@ -14,3 +14,4 @@ functions:
     handler: handler.handler
     events:
       - schedule: rate(1 hour)  
+    timeout: 100

@@ -2,6 +2,7 @@
   "type": "module",
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.662.0",
+    "@aws-sdk/client-ssm": "^3.662.0",
     "ethers": "^6.13.2",
     "node-telegram-bot-api": "^0.66.0"
   }
