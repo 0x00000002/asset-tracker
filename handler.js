@@ -71,23 +71,26 @@ const storeBlock = async block => {
   }
 }
 
-const storeTransfer = async ({ id, from, to, amount, token, block }) => {
-  try {
-    await ddb.put({
-      TableName: TRANSFERS_TABLE,
-      Item: {
-        chain: 'root',
-        id,
-        from,
-        to,
-        amount,
-        token,
-        block
-      }
-    })
-  } catch (error) {
-    console.error('Error saving transfer:', error)
+const storeTransfers = async items => {
+  const putRequests = items.map(item => ({
+    PutRequest: {
+      Item: item
+    }
+  }))
+
+  const params = {
+    RequestItems: {
+      [TRANSFERS_TABLE]: putRequests
+    }
   }
+
+  ddb.batchWrite(params, (err, data) => {
+    if (err) {
+      console.error('Error adding items:', JSON.stringify(err, null, 2))
+    } else {
+      console.log('Items added successfully:', JSON.stringify(data, null, 2))
+    }
+  })
 }
 
 // const findTransfers = async fromBlock => {
@@ -251,29 +254,31 @@ const fetchEvents = async (fromBlock, wallets, assets) => {
 }
 
 export const handler = async event => {
+  const msgs = []
+
   const fromBlock = await readBlock()
   const lastHeader = await api.rpc.chain.getHeader()
   const latestBlock = lastHeader.number.toNumber()
 
   const { wallets, assets, tokens, decimals, telegramBot } = await init()
-
   const events = await fetchEvents(fromBlock, wallets, assets)
-  const promises = []
 
-  events.map(({ id, name, args: { to, from, amount, assetId } }) => {
-    const token = assetId ? tokens[assetId] : 'ROOT'
-    const block = id.split('-')[0]
-    const precision = assetId ? 10 ** decimals[assetId] : 10 ** 6
-    const normalizedAmount = (amount / precision).toString()
-    const msg = `Token Transfer detected:\nBlock: ${block}\nFrom: ${from}\nTo: ${to}\nAsset: ${token}\nAmount: ${normalizedAmount}\n`
-    // telegramBot.sendMessage(TELEGRAM_CHAT_ID, msg)
+  const items = events.map(
+    ({ id, name, args: { to, from, amount, assetId } }) => {
+      const token = assetId ? tokens[assetId] : 'ROOT'
+      const block = id.split('-')[0]
+      const precision = assetId ? 10 ** decimals[assetId] : 10 ** 6
+      const normalizedAmount = (amount / precision).toString()
+      msgs.push(
+        `Token Transfer detected:\nBlock: ${block}\nFrom: ${from}\nTo: ${to}\nAsset: ${token}\nAmount: ${normalizedAmount}\n`
+      )
+      return { id, from, to, amount: normalizedAmount, token, block }
+    }
+  )
 
-    promises.push(
-      storeTransfer({ id, from, to, amount: normalizedAmount, token, block })
-    )
-  })
+  // telegramBot.sendMessage(TELEGRAM_CHAT_ID, msgs.join('\n\n'))
 
-  await Promise.all(promises)
+  await storeTransfers(items)
   await storeBlock(latestBlock)
 
   return {

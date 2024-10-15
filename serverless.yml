@@ -32,6 +32,7 @@ functions:
           - dynamodb:Scan
           - dynamodb:GetItem
           - dynamodb:PutItem
+          - dynamodb:BatchWriteItem
         Resource: "arn:aws:dynamodb:${self:provider.region}:*:table/*"
     environment:
       LAST_PROCESSED_BLOCK_TABLE: ${self:provider.environment.processedBlocksTable}
