@@ -5,13 +5,84 @@ app: asset-tracker
 # "service" is the name of this project. This will also be added to your AWS resource names.
 service: FV
 
+plugins:
+  - serverless-iam-roles-per-function
+
 provider:
   name: aws
   runtime: nodejs20.x
+  region: us-east-1
+  environment:
+    transfersTable: ${self:service}-transfers
+    processedBlocksTable: ${self:service}-processed-blocks
+    trackingTable: ${self:service}-tracking-data
 
 functions:
   asset-tracker:
     handler: handler.handler
     events:
-      - schedule: rate(1 hour)  
-    timeout: 100
+      - schedule: rate(1 day)  
+    timeout: 600
+    iamRoleStatementsName: my-custom-role-name
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - dynamodb:Scan
+          - dynamodb:GetItem
+          - dynamodb:PutItem
+        Resource: "arn:aws:dynamodb:${self:provider.region}:*:table/*"
+    environment:
+      LAST_PROCESSED_BLOCK_TABLE: ${self:provider.environment.processedBlocksTable}
+      TRANSFERS_TABLE: ${self:provider.environment.transfersTable}
+      TRACKING_TABLE: ${self:provider.environment.trackingTable}
+
+
+resources: 
+      Resources:
+        transfersTable:
+          Type: AWS::DynamoDB::Table
+          Properties:
+            TableName: ${self:provider.environment.transfersTable}
+            AttributeDefinitions:
+              - AttributeName: from
+                AttributeType: S
+              - AttributeName: block
+                AttributeType: N
+            KeySchema:
+              - AttributeName: from
+                KeyType: HASH
+              - AttributeName: block
+                KeyType: RANGE
+            ProvisionedThroughput:
+              ReadCapacityUnits: 1
+              WriteCapacityUnits: 1
+        processedBlocksTable:
+          Type: AWS::DynamoDB::Table
+          Properties:
+            TableName: ${self:provider.environment.processedBlocksTable}
+            AttributeDefinitions:
+              - AttributeName: chain
+                AttributeType: S
+            KeySchema:
+              - AttributeName: chain
+                KeyType: HASH
+            ProvisionedThroughput:
+              ReadCapacityUnits: 1
+              WriteCapacityUnits: 1              
+        trackingTable:
+          Type: AWS::DynamoDB::Table
+          Properties:
+            TableName: ${self:provider.environment.trackingTable}
+            AttributeDefinitions:
+              - AttributeName: type
+                AttributeType: S
+              - AttributeName: address
+                AttributeType: S
+            KeySchema:
+              - AttributeName: type
+                KeyType: HASH
+              - AttributeName: address
+                KeyType: RANGE
+            ProvisionedThroughput:
+              ReadCapacityUnits: 1
+              WriteCapacityUnits: 1                   
