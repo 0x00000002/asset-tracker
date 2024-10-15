@@ -2,11 +2,9 @@
   "type": "module",
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.670.0",
-    "@aws-sdk/client-secrets-manager": "^3.662.0",
-    "@aws-sdk/client-ssm": "^3.662.0",
     "@aws-sdk/lib-dynamodb": "^3.670.0",
     "@polkadot/api": "^14.0.1",
-    "ethers": "^6.13.2",
+    "node-fetch": "^3.3.2",
     "node-telegram-bot-api": "^0.63.0"
   },
   "devDependencies": {

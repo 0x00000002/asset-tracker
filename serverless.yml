@@ -16,6 +16,8 @@ provider:
     transfersTable: ${self:service}-transfers
     processedBlocksTable: ${self:service}-processed-blocks
     trackingTable: ${self:service}-tracking-data
+    graphqlEndpoint: "https://rootnet-mainnet.hasura.app/v1/graphql"
+    rootRPC: "wss://root.rootnet.live/archive/ws"
 
 functions:
   asset-tracker:
@@ -35,7 +37,12 @@ functions:
       LAST_PROCESSED_BLOCK_TABLE: ${self:provider.environment.processedBlocksTable}
       TRANSFERS_TABLE: ${self:provider.environment.transfersTable}
       TRACKING_TABLE: ${self:provider.environment.trackingTable}
+      GRAPHQL_ENDPOINT: ${self:provider.environment.graphqlEndpoint}
+      TG_CREDENTIALS: ${self:custom.supersecret}
+      ROOT_RPC: ${self:provider.environment.rootRPC}
 
+custom:
+  supersecret: ${ssm(raw):/aws/reference/secretsmanager/fv/asset-tracker/tgBotCredentials}
 
 resources: 
       Resources:
