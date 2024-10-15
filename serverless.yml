@@ -13,7 +13,7 @@ provider:
   runtime: nodejs20.x
   region: us-east-1
   environment:
-    transfersTable: ${self:service}-transfers
+    transfersTable: ${self:service}-transfers-found
     processedBlocksTable: ${self:service}-processed-blocks
     trackingTable: ${self:service}-tracking-data
     graphqlEndpoint: "https://rootnet-mainnet.hasura.app/v1/graphql"
@@ -23,8 +23,8 @@ functions:
   asset-tracker:
     handler: handler.handler
     events:
-      - schedule: rate(1 day)  
-    timeout: 600
+      - schedule: rate(1 hour)  
+    timeout: 20
     iamRoleStatementsName: my-custom-role-name
     iamRoleStatements:
       - Effect: "Allow"
@@ -51,14 +51,14 @@ resources:
           Properties:
             TableName: ${self:provider.environment.transfersTable}
             AttributeDefinitions:
+              - AttributeName: id
+                AttributeType: S
               - AttributeName: from
                 AttributeType: S
-              - AttributeName: block
-                AttributeType: N
             KeySchema:
-              - AttributeName: from
+              - AttributeName: id
                 KeyType: HASH
-              - AttributeName: block
+              - AttributeName: from
                 KeyType: RANGE
             ProvisionedThroughput:
               ReadCapacityUnits: 1

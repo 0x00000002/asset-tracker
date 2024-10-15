@@ -32,15 +32,19 @@ const init = async () => {
     console.error('Error reading tracking data', error)
   }
 
-  const wallets = items?.filter(i => i.type === 'wallet' && i.address) || []
-  const assets = items?.filter(i => i.type === 'asset' && i.id) || []
+  const wallets = items?.filter(i => i.type === 'wallet') || []
+  const assets = items?.filter(i => i.type === 'asset') || []
+  const tokens = Object.fromEntries(assets.map(({ id, name }) => [id, name]))
+  const decimals = Object.fromEntries(
+    assets.map(({ id, decimals }) => [id, decimals])
+  )
 
   const TG_CREDENTIALS = JSON.parse(process.env.TG_CREDENTIALS)
   const TELEGRAM_BOT_TOKEN = TG_CREDENTIALS.tgToken
   const TELEGRAM_CHAT_ID = TG_CREDENTIALS.chatId
   const telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN)
 
-  return { wallets, assets, telegramBot }
+  return { wallets, assets, tokens, decimals, telegramBot }
 }
 
 const readBlock = async () => {
@@ -56,7 +60,7 @@ const readBlock = async () => {
   }
 }
 
-const saveBlock = async block => {
+const storeBlock = async block => {
   try {
     await ddb.put({
       TableName: LAST_PROCESSED_BLOCK_TABLE,
@@ -67,17 +71,24 @@ const saveBlock = async block => {
   }
 }
 
-const storeTransfer = async event =>
-  ddb.put({
-    TableName: TRANSFERS_TABLE,
-    Item: {
-      chain: 'root',
-      from: event.from,
-      to: event.to,
-      value: event.value,
-      block: event.block
-    }
-  })
+const storeTransfer = async ({ id, from, to, amount, token, block }) => {
+  try {
+    await ddb.put({
+      TableName: TRANSFERS_TABLE,
+      Item: {
+        chain: 'root',
+        id,
+        from,
+        to,
+        amount,
+        token,
+        block
+      }
+    })
+  } catch (error) {
+    console.error('Error saving transfer:', error)
+  }
+}
 
 // const findTransfers = async fromBlock => {
 //   const lastHeader = await api.rpc.chain.getHeader()
@@ -189,14 +200,16 @@ const fetchEvents = async (fromBlock, wallets, assets) => {
     .join(',')
 
   const assetIds = assets
-    .map(asset => `{args: {_contains: {assetId: "${asset.id}"}}}`)
+    .map(asset => `{args: {_contains: {assetId: ${asset.id}}}}`)
     .join(',')
+
+  const startBlock = fromBlock.toString().padStart(10, '0')
 
   const query = `{
     archive {
       event(
         where: {_and: [
-          { block_id: { _gt: "${fromBlock}-00000"}}
+          { block_id: { _gt: "${startBlock}-00000"}}
           {_or: [${from}]}, 
           {_or: [
             {name: {_eq: "Balances.Transfer"}}, 
@@ -208,27 +221,31 @@ const fetchEvents = async (fromBlock, wallets, assets) => {
         ]}
         order_by: {block_id: desc}
       ) {
-          block_id
+          id
           name
           args
         }
       }
     }`
 
-  console.log({ query })
+  let json = {}
 
-  const response = await fetch(GRAPHQL_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query })
-  })
+  try {
+    const response = await fetch(GRAPHQL_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query })
+    })
 
-  const json = await response.json()
+    json = await response.json()
+  } catch (error) {
+    console.error('Error fetching events:', error)
+    return []
+  }
+
   const {
     data: { archive }
   } = json
-
-  console.log({ archive })
 
   return archive?.event || []
 }
@@ -238,20 +255,26 @@ export const handler = async event => {
   const lastHeader = await api.rpc.chain.getHeader()
   const latestBlock = lastHeader.number.toNumber()
 
-  const { wallets, assets, telegramBot } = await init()
+  const { wallets, assets, tokens, decimals, telegramBot } = await init()
 
   const events = await fetchEvents(fromBlock, wallets, assets)
-  console.log({ events })
+  const promises = []
 
-  events.map(e => {
-    const msg = `Token Transfer detected:\nFrom: ${e.from}\nTo: ${e.to}\nValue: ${e.value}`
-    console.log({ msg })
-
-    storeTransfer(e)
+  events.map(({ id, name, args: { to, from, amount, assetId } }) => {
+    const token = assetId ? tokens[assetId] : 'ROOT'
+    const block = id.split('-')[0]
+    const precision = assetId ? 10 ** decimals[assetId] : 10 ** 6
+    const normalizedAmount = (amount / precision).toString()
+    const msg = `Token Transfer detected:\nBlock: ${block}\nFrom: ${from}\nTo: ${to}\nAsset: ${token}\nAmount: ${normalizedAmount}\n`
     // telegramBot.sendMessage(TELEGRAM_CHAT_ID, msg)
+
+    promises.push(
+      storeTransfer({ id, from, to, amount: normalizedAmount, token, block })
+    )
   })
 
-  saveBlock(latestBlock)
+  await Promise.all(promises)
+  await storeBlock(latestBlock)
 
   return {
     statusCode: 200,
