@@ -4,14 +4,16 @@ import { ApiPromise, WsProvider } from '@polkadot/api'
 import { DynamoDB } from '@aws-sdk/client-dynamodb'
 import { DynamoDBDocument } from '@aws-sdk/lib-dynamodb'
 
-const REGION = 'us-east-1'
-const GRAPHQL_ENDPOINT = process.env.GRAPHQL_ENDPOINT
+const REGION = process.env.REGION
+const HASURA_ENDPOINT = process.env.HASURA_ENDPOINT
 const ROOT_RPC = process.env.ROOT_RPC
 
 const LAST_PROCESSED_BLOCK_TABLE = process.env.LAST_PROCESSED_BLOCK_TABLE
 const TRACKING_TABLE = process.env.TRACKING_TABLE
 const TRANSFERS_TABLE = process.env.TRANSFERS_TABLE
-const DEFAULT_LAST_PROCESSED_BLOCK = 15000000
+const TG_CREDENTIALS = JSON.parse(process.env.TG_CREDENTIALS)
+const TELEGRAM_BOT_TOKEN = TG_CREDENTIALS.tgToken
+const TELEGRAM_CHAT_ID = TG_CREDENTIALS.chatId
 
 const wsProvider = new WsProvider(ROOT_RPC)
 const api = await ApiPromise.create({ provider: wsProvider })
@@ -39,9 +41,6 @@ const init = async () => {
     assets.map(({ id, decimals }) => [id, decimals])
   )
 
-  const TG_CREDENTIALS = JSON.parse(process.env.TG_CREDENTIALS)
-  const TELEGRAM_BOT_TOKEN = TG_CREDENTIALS.tgToken
-  const TELEGRAM_CHAT_ID = TG_CREDENTIALS.chatId
   const telegramBot = new TelegramBot(TELEGRAM_BOT_TOKEN)
 
   return { wallets, assets, tokens, decimals, telegramBot }
@@ -87,68 +86,9 @@ const storeTransfers = async items => {
   ddb.batchWrite(params, (err, data) => {
     if (err) {
       console.error('Error adding items:', JSON.stringify(err, null, 2))
-    } else {
-      console.log('Items added successfully:', JSON.stringify(data, null, 2))
     }
   })
 }
-
-// const findTransfers = async fromBlock => {
-//   const lastHeader = await api.rpc.chain.getHeader()
-//   const latestBlock = lastHeader.number.toNumber()
-//   const batchSize = 100
-
-//   let events = []
-
-//   while (fromBlock < latestBlock) {
-//     let trackedEvents = []
-//     const promises = []
-//     const toBlock = Math.min(fromBlock + batchSize, latestBlock)
-
-//     try {
-//       // Set the upper limit for the current batch
-
-//       for (let i = fromBlock; i < toBlock; i++) {
-//         // Fetch the block hash for the current block
-//         const blockHash = await api.rpc.chain.getBlockHash(i)
-//         const apiAt = await api.at(blockHash)
-
-//         promises.push(
-//           apiAt.query.system.events().then(events => {
-//             events.map(({ event }) => {
-//               if (event.section === 'balances' && event.method === 'Transfer') {
-//                 const [from, to, value] = event.data
-//                 trackedEvents.push({
-//                   from: from.toString(),
-//                   to: to.toString(),
-//                   value: value.toString(),
-//                   block: i
-//                 })
-//               }
-//             })
-//           })
-//         )
-//       }
-
-//       // Wait for all promises in the current batch to resolve
-//       await Promise.all(promises)
-//     } catch (error) {
-//       console.error('Error fetching events in batch:', error, fromBlock)
-//     }
-
-//     const foundEvents = trackedEvents.length
-//       ? trackedEvents.filter(e => accounts.includes(e.from))
-//       : []
-
-//     events.push(...foundEvents)
-
-//     // Move to the next batch
-//     saveBlock(toBlock)
-//     fromBlock += batchSize
-//     console.log('Processed block:', fromBlock)
-//   }
-//   return events
-// }
 
 const fetchEvents = async (fromBlock, wallets, assets) => {
   // --------------------------------------------------------------------
@@ -227,6 +167,7 @@ const fetchEvents = async (fromBlock, wallets, assets) => {
           id
           name
           args
+          extrinsic_id
         }
       }
     }`
@@ -234,7 +175,7 @@ const fetchEvents = async (fromBlock, wallets, assets) => {
   let json = {}
 
   try {
-    const response = await fetch(GRAPHQL_ENDPOINT, {
+    const response = await fetch(HASURA_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query })
@@ -264,27 +205,50 @@ export const handler = async event => {
   const events = await fetchEvents(fromBlock, wallets, assets)
 
   const items = events.map(
-    ({ id, name, args: { to, from, amount, assetId } }) => {
+    ({ id, extrinsic_id, name, args: { to, from, amount, assetId } }) => {
       const token = assetId ? tokens[assetId] : 'ROOT'
-      const block = id.split('-')[0]
+      const fromAddr = from.slice(0, 8) + '...' + from.slice(-6)
+      const toAddr = to.slice(0, 8) + '...' + to.slice(-6)
+      const link = `https://explorer.rootnet.live/extrinsic/${extrinsic_id}`
       const precision = assetId ? 10 ** decimals[assetId] : 10 ** 6
       const normalizedAmount = (amount / precision).toString()
+      const formattedAmount =
+        Intl.NumberFormat('en-US').format(normalizedAmount)
+
       msgs.push(
-        `Token Transfer detected:\nBlock: ${block}\nFrom: ${from}\nTo: ${to}\nAsset: ${token}\nAmount: ${normalizedAmount}\n`
+        `💰 **${formattedAmount}** ${token}\n` +
+          `👤 \`${fromAddr}\`\n` +
+          `➡️ \`${toAddr}\`\n` +
+          `🔎 [${extrinsic_id}](${link})`
       )
-      return { id, from, to, amount: normalizedAmount, token, block }
+      return { id, from, to, amount: normalizedAmount, token }
     }
   )
-
-  // telegramBot.sendMessage(TELEGRAM_CHAT_ID, msgs.join('\n\n'))
 
   await storeTransfers(items)
   await storeBlock(latestBlock)
 
+  if (msgs.length) {
+    try {
+      const header =
+        '\n\n----------------------------------\n💸 Token Transfer(s) detected! 💸\n----------------------------------\n\n'
+      await telegramBot.sendMessage(
+        TELEGRAM_CHAT_ID,
+        header + msgs.join('\n\n'),
+        {
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        }
+      )
+    } catch (error) {
+      console.error('Error sending Telegram message:', error)
+    }
+  }
+
   return {
     statusCode: 200,
     body: events.length
-      ? 'Token transfers detected. Check the DynamoDB.'
+      ? 'Token transfers detected. Telegram messages sent, data stored'
       : 'No new transfers.'
   }
 }

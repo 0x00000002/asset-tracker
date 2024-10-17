@@ -35,10 +35,11 @@ functions:
           - dynamodb:BatchWriteItem
         Resource: "arn:aws:dynamodb:${self:provider.region}:*:table/*"
     environment:
+      REGION: ${self:provider.region}
       LAST_PROCESSED_BLOCK_TABLE: ${self:provider.environment.processedBlocksTable}
       TRANSFERS_TABLE: ${self:provider.environment.transfersTable}
       TRACKING_TABLE: ${self:provider.environment.trackingTable}
-      GRAPHQL_ENDPOINT: ${self:provider.environment.graphqlEndpoint}
+      HASURA_ENDPOINT: ${self:provider.environment.graphqlEndpoint}
       TG_CREDENTIALS: ${self:custom.supersecret}
       ROOT_RPC: ${self:provider.environment.rootRPC}
 
