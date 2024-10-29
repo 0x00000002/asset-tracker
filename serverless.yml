@@ -18,13 +18,14 @@ provider:
     trackingTable: ${self:service}-tracking-data
     graphqlEndpoint: "https://rootnet-mainnet.hasura.app/v1/graphql"
     rootRPC: "wss://root.rootnet.live/archive/ws"
+    transferLimit: 1000
 
 functions:
   asset-tracker:
     handler: handler.handler
     events:
       - schedule: rate(1 hour)  
-    timeout: 20
+    timeout: 60
     iamRoleStatementsName: my-custom-role-name
     iamRoleStatements:
       - Effect: "Allow"
@@ -42,6 +43,7 @@ functions:
       HASURA_ENDPOINT: ${self:provider.environment.graphqlEndpoint}
       TG_CREDENTIALS: ${self:custom.supersecret}
       ROOT_RPC: ${self:provider.environment.rootRPC}
+      TRANSFER_LIMIT: ${self:provider.environment.transferLimit}
 
 custom:
   supersecret: ${ssm(raw):/aws/reference/secretsmanager/fv/asset-tracker/tgBotCredentials}
