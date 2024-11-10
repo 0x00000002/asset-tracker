@@ -38,33 +38,43 @@ const init = async () => {
     console.error('Error reading tracking data', error)
   }
 
-  const { wallets, fps, whitelist, tokens, decimals, assetIds } = items.reduce(
-    (acc, { type, address, fp, id, name, decimals: d }) => {
-      if (type === 'wallet') {
-        acc.wallets.push(address)
-        acc.fps[address] = fp
-      } else if (type === 'whitelist') {
-        acc.whitelist.push(address)
-      } else if (type === 'asset') {
-        acc.assetIds.push(id)
-        acc.tokens[id] = name
-        acc.decimals[id] = d
+  const { wallets, futurePass, whitelist, tokens, decimals, assetIds } =
+    items.reduce(
+      (acc, { type, address, fp, id, name, decimals: d }) => {
+        if (type === 'wallet') {
+          acc.wallets.push(address?.toLowerCase())
+          acc.futurePass[address.toLowerCase()] = fp?.toLowerCase()
+        } else if (type === 'whitelist') {
+          acc.whitelist.push(address?.toLowerCase())
+        } else if (type === 'asset') {
+          acc.assetIds.push(id)
+          acc.tokens[id] = name
+          acc.decimals[id] = d
+        }
+        return acc
+      },
+      {
+        wallets: [],
+        futurePass: {},
+        whitelist: [],
+        tokens: {},
+        decimals: {},
+        assetIds: []
       }
-      return acc
-    },
-    {
-      wallets: [],
-      fps: {},
-      whitelist: [],
-      tokens: {},
-      decimals: {},
-      assetIds: []
-    }
-  )
+    )
 
   const tgBot = new TelegramBot(TELEGRAM_BOT_TOKEN)
 
-  return { wallets, fps, whitelist, assetIds, tokens, decimals, tgBot, api }
+  return {
+    wallets,
+    futurePass,
+    whitelist,
+    assetIds,
+    tokens,
+    decimals,
+    tgBot,
+    api
+  }
 }
 
 const readBlock = async () => {
@@ -104,7 +114,6 @@ const storeTransfers = async items => {
 
   for (const chunk of itemChunks) {
     const putRequests = chunk.map(item => {
-      console.log({ item })
       return {
         PutRequest: {
           Item: item
@@ -133,12 +142,10 @@ const fetchEvents = async ({
   whitelist,
   assetIds
 }) => {
-  const from = wallets
-    .map(w => `{args: {_contains: {from: "${w.toLowerCase()}"}}}`)
-    .join('')
+  const from = wallets.map(w => `{args: {_contains: {from: "${w}"}}}`).join('')
 
   const whitelisted = whitelist
-    .map(w => `{args: {_contains: { to: "${w.toLowerCase()}"}}}`)
+    .map(w => `{args: {_contains: { to: "${w}"}}}`)
     .join('')
 
   // const ids = assetIds
@@ -259,9 +266,9 @@ export const handler = async event => {
           Intl.NumberFormat('en-US').format(normalizedAmount)
 
         const overThreshold = amount > transferLimit * precision
-        const toDifferentUser = to !== futurePass[to]
+        const toDifferentUser = to !== futurePass[from]
 
-        if (toDifferentUser || overThreshold) {
+        if (toDifferentUser && overThreshold) {
           msgs.push(
             `💰**${formattedAmount}** ${token}\n` +
               `👤\`${from}\`\n` +
